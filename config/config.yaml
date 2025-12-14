@@ -1,0 +1,129 @@
+experiment:
+  name: roadsignnet_sal_v1
+  description: Novel lightweight architecture for road sign detection
+  seed: 42
+  deterministic: true
+model:
+  num_classes: 43
+  width_multiplier: 1.0
+  pretrained: false
+  pretrained_path: null
+  class_names: &id001
+  - bicycle
+  - bus_stop
+  - children
+  - crosswalk
+  - do_not_stop
+  - do_not_turn_left
+  - do_not_turn_right
+  - do_not_u_turn
+  - enter_left_lane
+  - give_way
+  - green_light
+  - left_lane_enter
+  - left_turn
+  - narrow_road
+  - no_entry
+  - no_overtaking
+  - no_parking
+  - no_stop
+  - no_waiting
+  - parking
+  - railway_crossing
+  - red_light
+  - refueling
+  - right_turn
+  - road_main
+  - road_work
+  - school_nearby
+  - speed_bump
+  - speed_limit_100
+  - speed_limit_120
+  - speed_limit_20
+  - speed_limit_30
+  - speed_limit_40
+  - speed_limit_50
+  - speed_limit_60
+  - speed_limit_70
+  - speed_limit_80
+  - stop
+  - t_intersection_l
+  - truck
+  - u_turn
+  - warning
+  - yellow_light
+data:
+  train_img_dir: ./data/train/images
+  train_label_dir: ./data/train/labels
+  val_img_dir: ./data/valid/images
+  val_label_dir: ./data/valid/labels
+  test_img_dir: ./data/test/images
+  test_label_dir: ./data/test/labels
+  img_size: 640
+  num_classes: 43
+  class_names: *id001
+training:
+  epochs: 150
+  batch_size: 16
+  num_workers: 4
+  pin_memory: true
+  optimizer:
+    name: AdamW
+    lr: 0.001
+    weight_decay: 0.0005
+    betas:
+    - 0.9
+    - 0.999
+  scheduler:
+    name: CosineAnnealingLR
+    T_max: 200
+    eta_min: 1.0e-05
+  loss:
+    lambda_cls: 1.0
+    lambda_box: 5.0
+    lambda_obj: 1.0
+  augmentation:
+    enable: true
+    horizontal_flip: 0.5
+    brightness_contrast: 0.3
+    hue_saturation: 0.3
+    gauss_noise: 0.2
+    rotation: 10
+    scale:
+    - 0.8
+    - 1.2
+validation:
+  interval: 1
+  save_best: true
+  metric: val_loss
+checkpoint:
+  save_dir: ./outputs/checkpoints
+  save_interval: 10
+  keep_last_n: 5
+  resume_from: null
+logging:
+  log_dir: ./outputs/logs
+  use_tensorboard: true
+  use_wandb: false
+  wandb_project: roadsignnet-sal
+  wandb_entity: your-username
+  print_interval: 10
+hardware:
+  device: cuda
+  gpu_ids:
+  - 0
+  mixed_precision: true
+  cudnn_benchmark: true
+export:
+  save_dir: ./outputs/exports
+  formats:
+  - onnx
+  - torchscript
+  - tflite
+  quantize: true
+roboflow:
+  api_key: tBBUOkujjBJMhxfyqPqv
+  workspace: us-traffic-signs-pwkzx
+  project: us-road-signs
+  version: 72
+  format: yolov8
