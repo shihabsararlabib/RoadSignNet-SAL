@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RoadSignNet-SAL Training Script
+RoadSignNet-SAL Training Script with Transfer Learning Support
 """
 
 import sys
@@ -18,7 +18,7 @@ import argparse
 import time
 from datetime import datetime
 
-from roadsignnet_sal.model import create_roadsignnet_sal
+from roadsignnet_sal.model import create_roadsignnet_sal, create_roadsignnet_transfer
 from roadsignnet_sal.loss import RoadSignNetLoss
 from roadsignnet_sal.dataset import create_dataloader
 
@@ -65,28 +65,51 @@ def setup_directories(config):
         Path(dir_path).mkdir(parents=True, exist_ok=True)
 
 
-def train(config):
+def train(config, use_transfer_learning=False, backbone='mobilenet_v3_small', freeze_backbone=False):
     """Main training loop"""
     
     # Setup
     setup_directories(config)
-    device = torch.device(config['hardware']['device'] if torch.cuda.is_available() else 'cpu')
+    # Force CPU if CUDA has issues (paging file errors)
+    try:
+        if torch.cuda.is_available():
+            device = torch.device(config['hardware']['device'])
+        else:
+            device = torch.device('cpu')
+    except:
+        device = torch.device('cpu')
+        print("⚠️  Warning: CUDA library loading failed, using CPU")
     
     print("="*70)
-    print("ROADSIGNNET-SAL TRAINING")
+    if use_transfer_learning:
+        print("ROADSIGNNET-SAL TRAINING (TRANSFER LEARNING)")
+        print(f"Backbone: {backbone} (ImageNet pretrained)")
+    else:
+        print("ROADSIGNNET-SAL TRAINING")
     print("="*70)
     print(f"Device: {device}")
     print(f"Experiment: {config['experiment']['name']}")
     print(f"Epochs: {config['training']['epochs']}")
     print(f"Batch Size: {config['training']['batch_size']}")
     
-    # Model
-    model = create_roadsignnet_sal(
-        num_classes=config['model']['num_classes'],
-        width_multiplier=config['model']['width_multiplier']
-    ).to(device)
+    # Model - choose between original and transfer learning
+    if use_transfer_learning:
+        model = create_roadsignnet_transfer(
+            num_classes=config['model']['num_classes'],
+            backbone=backbone,
+            pretrained=True,
+            freeze_backbone=freeze_backbone
+        ).to(device)
+    else:
+        model = create_roadsignnet_sal(
+            num_classes=config['model']['num_classes'],
+            width_multiplier=config['model']['width_multiplier']
+        ).to(device)
     
-    print(f"\nModel Parameters: {sum(p.numel() for p in model.parameters()):,}")
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"\nTotal Parameters: {total_params:,}")
+    print(f"Trainable Parameters: {trainable_params:,}")
     
     # Loss
     criterion = RoadSignNetLoss(
@@ -251,7 +274,21 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train RoadSignNet-SAL')
     parser.add_argument('--config', type=str, default='config/config.yaml',
                        help='Path to config file')
+    parser.add_argument('--transfer', action='store_true',
+                       help='Use transfer learning with pretrained backbone')
+    parser.add_argument('--backbone', type=str, default='mobilenet_v3_small',
+                       choices=['mobilenet_v3_small', 'mobilenet_v3_large', 'efficientnet_b0', 'resnet18'],
+                       help='Backbone for transfer learning')
+    parser.add_argument('--freeze', action='store_true',
+                       help='Freeze backbone weights (only train neck and head)')
     args = parser.parse_args()
     
-    config = load_config(args.config)
-    train(config)
+    # Resolve config path relative to script location
+    if not os.path.isabs(args.config):
+        script_dir = Path(__file__).parent.parent
+        config_path = script_dir / args.config
+    else:
+        config_path = args.config
+    
+    config = load_config(config_path)
+    train(config, use_transfer_learning=args.transfer, backbone=args.backbone, freeze_backbone=args.freeze)

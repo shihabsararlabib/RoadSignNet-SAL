@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from roadsignnet_sal.model import create_roadsignnet_sal
+from roadsignnet_sal.model import create_roadsignnet_sal, create_roadsignnet_transfer
 from roadsignnet_sal.loss import RoadSignNetLoss, DetectionDecoder
 from roadsignnet_sal.dataset import create_dataloader
 
@@ -58,7 +58,17 @@ def calculate_ap(precisions, recalls):
     return ap
 
 
-def evaluate(config, checkpoint_path):
+def detect_model_type(checkpoint):
+    """Detect if checkpoint is from transfer learning or original model"""
+    state_dict = checkpoint['model_state_dict']
+    # Transfer learning model has 'backbone.features' keys
+    for key in state_dict.keys():
+        if key.startswith('backbone.features'):
+            return 'transfer'
+    return 'original'
+
+
+def evaluate(config, checkpoint_path, backbone='mobilenet_v3_small'):
     """Evaluate model on test set with accuracy metrics"""
     
     device = torch.device(config['hardware']['device'] if torch.cuda.is_available() else 'cpu')
@@ -67,14 +77,27 @@ def evaluate(config, checkpoint_path):
     print("ROADSIGNNET-SAL EVALUATION")
     print("="*70)
     
-    # Load model
-    num_classes = config['model']['num_classes']
-    model = create_roadsignnet_sal(
-        num_classes=num_classes,
-        width_multiplier=config['model']['width_multiplier']
-    ).to(device)
-    
+    # Load checkpoint first to detect model type
     checkpoint = torch.load(checkpoint_path, map_location=device)
+    model_type = detect_model_type(checkpoint)
+    
+    num_classes = config['model']['num_classes']
+    
+    # Create appropriate model
+    if model_type == 'transfer':
+        print(f"✓ Detected transfer learning model (backbone: {backbone})")
+        model = create_roadsignnet_transfer(
+            num_classes=num_classes,
+            backbone=backbone,
+            pretrained=False  # Don't need pretrained weights, we'll load from checkpoint
+        ).to(device)
+    else:
+        print("✓ Detected original RoadSignNet-SAL model")
+        model = create_roadsignnet_sal(
+            num_classes=num_classes,
+            width_multiplier=config['model']['width_multiplier']
+        ).to(device)
+    
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     
@@ -303,9 +326,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config/config.yaml')
     parser.add_argument('--checkpoint', type=str, required=True)
+    parser.add_argument('--backbone', type=str, default='mobilenet_v3_small',
+                       choices=['mobilenet_v3_small', 'mobilenet_v3_large', 'efficientnet_b0', 'resnet18'],
+                       help='Backbone used for transfer learning model')
     args = parser.parse_args()
     
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
     
-    evaluate(config, args.checkpoint)
+    evaluate(config, args.checkpoint, args.backbone)

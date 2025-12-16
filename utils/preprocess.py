@@ -25,10 +25,11 @@ class Preprocessor:
             A.Rotate(limit=10, p=0.3, border_mode=cv2.BORDER_CONSTANT),
             A.PadIfNeeded(self.img_size, self.img_size, border_mode=cv2.BORDER_CONSTANT),
             A.Resize(self.img_size, self.img_size),
+            A.ToFloat(max_value=255.0),  # Convert to float before normalize to avoid LUT issues
             A.Normalize(
                 mean=[0.485, 0.456, 0.406],
                 std=[0.229, 0.224, 0.225],
-                max_pixel_value=255.0
+                max_pixel_value=1.0  # Already converted to 0-1 range by ToFloat
             ),
             ToTensorV2(),
         ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels'], min_visibility=0.3))
@@ -38,10 +39,11 @@ class Preprocessor:
         return A.Compose([
             A.PadIfNeeded(self.img_size, self.img_size, border_mode=cv2.BORDER_CONSTANT),
             A.Resize(self.img_size, self.img_size),
+            A.ToFloat(max_value=255.0),  # Convert to float before normalize to avoid LUT issues
             A.Normalize(
                 mean=[0.485, 0.456, 0.406],
                 std=[0.229, 0.224, 0.225],
-                max_pixel_value=255.0
+                max_pixel_value=1.0  # Already converted to 0-1 range by ToFloat
             ),
             ToTensorV2(),
         ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
@@ -51,10 +53,11 @@ class Preprocessor:
         return A.Compose([
             A.PadIfNeeded(self.img_size, self.img_size, border_mode=cv2.BORDER_CONSTANT),
             A.Resize(self.img_size, self.img_size),
+            A.ToFloat(max_value=255.0),  # Convert to float before normalize to avoid LUT issues
             A.Normalize(
                 mean=[0.485, 0.456, 0.406],
                 std=[0.229, 0.224, 0.225],
-                max_pixel_value=255.0
+                max_pixel_value=1.0  # Already converted to 0-1 range by ToFloat
             ),
             ToTensorV2(),
         ])
