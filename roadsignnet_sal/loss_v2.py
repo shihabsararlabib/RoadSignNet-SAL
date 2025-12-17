@@ -84,11 +84,11 @@ class AnchorFreeLoss(nn.Module):
             valid_bboxes = bboxes[b, valid_objs]  # [N, 4]
             valid_labels = labels[b, valid_objs]  # [N]
             
-            # Compute centers and sizes
-            cx = (valid_bboxes[:, 0] + valid_bboxes[:, 2]) / 2  # [N]
-            cy = (valid_bboxes[:, 1] + valid_bboxes[:, 3]) / 2
-            box_w = valid_bboxes[:, 2] - valid_bboxes[:, 0]
-            box_h = valid_bboxes[:, 3] - valid_bboxes[:, 1]
+            # Compute centers and sizes (bboxes are normalized [0,1], convert to pixels)
+            cx = ((valid_bboxes[:, 0] + valid_bboxes[:, 2]) / 2) * img_size  # [N] in pixels
+            cy = ((valid_bboxes[:, 1] + valid_bboxes[:, 3]) / 2) * img_size  # [N] in pixels
+            box_w = (valid_bboxes[:, 2] - valid_bboxes[:, 0]) * img_size  # in pixels
+            box_h = (valid_bboxes[:, 3] - valid_bboxes[:, 1]) * img_size  # in pixels
             
             # Skip invalid boxes
             valid_size = (box_w > 0) & (box_h > 0)
@@ -101,7 +101,7 @@ class AnchorFreeLoss(nn.Module):
             box_h = box_h[valid_size]
             valid_labels = valid_labels[valid_size]
             
-            # Grid coordinates
+            # Grid coordinates (now cx/cy are in pixels, so dividing by stride gives grid coords)
             grid_x = (cx / stride).long().clamp(0, w - 1)
             grid_y = (cy / stride).long().clamp(0, h - 1)
             
