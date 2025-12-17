@@ -17,7 +17,9 @@ import numpy as np
 import pandas as pd
 
 from roadsignnet_sal.model import create_roadsignnet_sal, create_roadsignnet_transfer
+from roadsignnet_sal.model_v2 import create_roadsignnet_v2
 from roadsignnet_sal.loss import RoadSignNetLoss, DetectionDecoder
+from roadsignnet_sal.loss_v2 import create_loss_v2, AnchorFreeDecoder
 from roadsignnet_sal.dataset import create_dataloader
 
 
@@ -59,10 +61,12 @@ def calculate_ap(precisions, recalls):
 
 
 def detect_model_type(checkpoint):
-    """Detect if checkpoint is from transfer learning or original model"""
+    """Detect if checkpoint is from V2, transfer learning, or original model"""
     state_dict = checkpoint['model_state_dict']
-    # Transfer learning model has 'backbone.features' keys
+    # Check for V2 model (MobileNetV2 backbone + anchor-free detection)
     for key in state_dict.keys():
+        if key.startswith('detection_head.spatial_attention') or key.startswith('detection_head.context_aware'):
+            return 'v2'
         if key.startswith('backbone.features'):
             return 'transfer'
     return 'original'
@@ -84,40 +88,84 @@ def evaluate(config, checkpoint_path, backbone='mobilenet_v3_small'):
     num_classes = config['model']['num_classes']
     
     # Create appropriate model
-    if model_type == 'transfer':
+    if model_type == 'v2':
+        print("✓ Detected RoadSignNet-SAL V2 (anchor-free with novel contributions)")
+        model = create_roadsignnet_v2(
+            num_classes=num_classes,
+            enhanced=True  # Use enhanced mode with novel attention modules
+        ).to(device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()
+        
+        print(f"✓ Model loaded from: {checkpoint_path}")
+        print(f"✓ Trained for {checkpoint['epoch']+1} epochs")
+        print(f"✓ Number of classes: {num_classes}")
+        print(f"✓ Device: {device}")
+        
+        # V2 uses anchor-free loss and decoder
+        criterion = create_loss_v2(num_classes=num_classes)
+        decoder = AnchorFreeDecoder(
+            num_classes=num_classes,
+            conf_thresh=0.1,  # Lower threshold for Gaussian heatmaps
+            nms_thresh=0.45
+        )
+        
+    elif model_type == 'transfer':
         print(f"✓ Detected transfer learning model (backbone: {backbone})")
         model = create_roadsignnet_transfer(
             num_classes=num_classes,
             backbone=backbone,
             pretrained=False  # Don't need pretrained weights, we'll load from checkpoint
         ).to(device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()
+        
+        print(f"✓ Model loaded from: {checkpoint_path}")
+        print(f"✓ Trained for {checkpoint['epoch']+1} epochs")
+        print(f"✓ Number of classes: {num_classes}")
+        print(f"✓ Device: {device}")
+        
+        # Loss function
+        criterion = RoadSignNetLoss(
+            num_classes=num_classes,
+            lambda_cls=config['training']['loss']['lambda_cls'],
+            lambda_box=config['training']['loss']['lambda_box'],
+            lambda_obj=config['training']['loss']['lambda_obj']
+        )
+        
+        # Decoder
+        decoder = DetectionDecoder(
+            num_classes=num_classes,
+            conf_thresh=0.25,
+            nms_thresh=0.45
+        )
+        
     else:
         print("✓ Detected original RoadSignNet-SAL model")
         model = create_roadsignnet_sal(
             num_classes=num_classes,
             width_multiplier=config['model']['width_multiplier']
         ).to(device)
-    
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model.eval()
-    
-    print(f"✓ Model loaded from: {checkpoint_path}")
-    print(f"✓ Trained for {checkpoint['epoch']+1} epochs")
-    print(f"✓ Number of classes: {num_classes}")
-    print(f"✓ Device: {device}")
-    
-    # Loss function
-    criterion = RoadSignNetLoss(
-        num_classes=num_classes,
-        lambda_cls=config['training']['loss']['lambda_cls'],
-        lambda_box=config['training']['loss']['lambda_box'],
-        lambda_obj=config['training']['loss']['lambda_obj']
-    )
-    
-    # Decoder
-    decoder = DetectionDecoder(
-        num_classes=num_classes,
-        conf_thresh=0.25,
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()
+        
+        print(f"✓ Model loaded from: {checkpoint_path}")
+        print(f"✓ Trained for {checkpoint['epoch']+1} epochs")
+        print(f"✓ Number of classes: {num_classes}")
+        print(f"✓ Device: {device}")
+        
+        # Loss function
+        criterion = RoadSignNetLoss(
+            num_classes=num_classes,
+            lambda_cls=config['training']['loss']['lambda_cls'],
+            lambda_box=config['training']['loss']['lambda_box'],
+            lambda_obj=config['training']['loss']['lambda_obj']
+        )
+        
+        # Decoder
+        decoder = DetectionDecoder(
+            num_classes=num_classes,
+            conf_thresh=0.25,
         iou_thresh=0.45,
         img_size=config['data']['img_size']
     )

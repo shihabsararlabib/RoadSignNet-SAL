@@ -16,20 +16,14 @@ class Preprocessor:
         self.img_size = img_size
     
     def training_transform(self):
-        """Training augmentation pipeline"""
+        """OPTIMIZED: Fast training augmentation pipeline"""
         return A.Compose([
             A.HorizontalFlip(p=0.5),
-            A.RandomBrightnessContrast(p=0.3),
-            A.HueSaturationValue(p=0.3),
-            A.GaussNoise(p=0.2),
-            A.Rotate(limit=10, p=0.3, border_mode=cv2.BORDER_CONSTANT),
-            A.PadIfNeeded(self.img_size, self.img_size, border_mode=cv2.BORDER_CONSTANT),
+            A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
             A.Resize(self.img_size, self.img_size),
-            A.ToFloat(max_value=255.0),  # Convert to float before normalize to avoid LUT issues
             A.Normalize(
                 mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225],
-                max_pixel_value=1.0  # Already converted to 0-1 range by ToFloat
+                std=[0.229, 0.224, 0.225]
             ),
             ToTensorV2(),
         ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels'], min_visibility=0.3))

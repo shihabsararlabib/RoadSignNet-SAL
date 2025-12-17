@@ -59,29 +59,30 @@ data:
   val_label_dir: ./data/valid/labels
   test_img_dir: ./data/test/images
   test_label_dir: ./data/test/labels
-  img_size: 640
+  img_size: 416
   num_classes: 43
   class_names: *id001
 training:
-  epochs: 150
-  batch_size: 4
+  epochs: 100
+  batch_size: 32
   num_workers: 0
   pin_memory: false
   optimizer:
     name: AdamW
     lr: 0.001
-    weight_decay: 0.0005
+    weight_decay: 0.0001
     betas:
     - 0.9
     - 0.999
   scheduler:
     name: CosineAnnealingLR
-    T_max: 200
-    eta_min: 1.0e-05
+    T_max: 150
+    eta_min: 1.0e-06
   loss:
+    lambda_heat: 1.0
     lambda_cls: 1.0
-    lambda_box: 5.0
-    lambda_obj: 1.0
+    lambda_box: 1.0
+    lambda_obj: 2.0
   augmentation:
     enable: true
     horizontal_flip: 0.5
