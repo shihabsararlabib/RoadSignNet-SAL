@@ -64,7 +64,7 @@ data:
   class_names: *id001
 training:
   epochs: 100
-  batch_size: 32
+  batch_size: 16  # Reduced from 32 to save memory
   num_workers: 0
   pin_memory: false
   optimizer:
@@ -84,7 +84,7 @@ training:
     lambda_box: 1.0
     lambda_obj: 2.0
   augmentation:
-    enable: true
+    enable: false  # Temporarily disabled to reduce memory usage
     horizontal_flip: 0.5
     brightness_contrast: 0.3
     hue_saturation: 0.3

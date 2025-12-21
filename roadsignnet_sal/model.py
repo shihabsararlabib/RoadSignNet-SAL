@@ -1,6 +1,6 @@
 """
 RoadSignNet-SAL: Complete Model with Transfer Learning Support
-Supports: MobileNetV3, EfficientNet-B0, ResNet18 pretrained backbones
+Supports: YOLOv8n, MobileNetV3, EfficientNet-B0, ResNet18 pretrained backbones
 """
 
 import torch
@@ -15,6 +15,12 @@ from .modules import (
     StemBlock, ACBStage, EfficientFeaturePyramid,
     LightweightDetectionHead
 )
+
+try:
+    from ultralytics import YOLO
+    ULTRALYTICS_AVAILABLE = True
+except ImportError:
+    ULTRALYTICS_AVAILABLE = False
 
 
 class FeaturePyramidNeck(nn.Module):
@@ -81,32 +87,42 @@ class RoadSignNetTransfer(nn.Module):
     
     # Verified feature channels from actual model inspection
     BACKBONES = {
+        'yolov8n': {
+            'type': 'yolo',
+            # YOLOv8n backbone channels: 64, 128, 256 (for P3, P4, P5)
+            'feature_channels': [64, 128, 256],
+            'model_name': 'yolov8n.pt',
+        },
         'mobilenet_v3_small': {
+            'type': 'torchvision',
             'model': models.mobilenet_v3_small,
             'weights': MobileNet_V3_Small_Weights.IMAGENET1K_V1,
             # Layer 3: 24ch (80x80), Layer 8: 48ch (40x40), Layer 11: 96ch (20x20)
             'feature_channels': [24, 48, 96],
-            'feature_indices': [3, 8, 11],  # Fixed: use layer 11 (96ch) not 12 (576ch)
+            'feature_indices': [3, 8, 11],
         },
         'mobilenet_v3_large': {
+            'type': 'torchvision',
             'model': models.mobilenet_v3_large,
             'weights': MobileNet_V3_Large_Weights.IMAGENET1K_V1,
-            # Layer 6: 40ch, Layer 12: 112ch, Layer 15: 160ch
+            # Layer 6: 40ch (80x80), Layer 12: 112ch (40x40), Layer 15: 160ch (20x20)
             'feature_channels': [40, 112, 160],
             'feature_indices': [6, 12, 15],
         },
         'efficientnet_b0': {
+            'type': 'torchvision',
             'model': models.efficientnet_b0,
             'weights': EfficientNet_B0_Weights.IMAGENET1K_V1,
-            # Stages 3, 5, 8 for different scales
+            # Layer 3: 40ch (80x80), Layer 5: 112ch (40x40), Layer 7: 320ch (20x20)
             'feature_channels': [40, 112, 320],
-            'feature_indices': [3, 5, 8],
+            'feature_indices': [3, 5, 7],
         },
         'resnet18': {
+            'type': 'torchvision',
             'model': models.resnet18,
             'weights': ResNet18_Weights.IMAGENET1K_V1,
             'feature_channels': [128, 256, 512],
-            'feature_indices': [5, 6, 7],  # layer2, layer3, layer4
+            'feature_indices': [5, 6, 7],
         },
     }
     
@@ -121,16 +137,27 @@ class RoadSignNetTransfer(nn.Module):
             raise ValueError(f"Backbone {backbone} not supported. Choose from: {list(self.BACKBONES.keys())}")
         
         backbone_config = self.BACKBONES[backbone]
+        self.backbone_type = backbone_config.get('type', 'torchvision')
         
         # Load pretrained backbone
-        if pretrained:
-            print(f"✓ Loading pretrained {backbone} weights from ImageNet...")
-            self.backbone = backbone_config['model'](weights=backbone_config['weights'])
+        if self.backbone_type == 'yolo':
+            if not ULTRALYTICS_AVAILABLE:
+                raise ImportError("ultralytics package required for YOLOv8. Install with: pip install ultralytics")
+            if pretrained:
+                print(f"✓ Loading pretrained YOLOv8n weights...")
+                yolo_model = YOLO(backbone_config['model_name'])
+                self.backbone = yolo_model.model.model[:10]  # Extract backbone (first 10 layers)
+            else:
+                raise ValueError("YOLOv8 requires pretrained weights")
         else:
-            self.backbone = backbone_config['model'](weights=None)
+            if pretrained:
+                print(f"✓ Loading pretrained {backbone} weights from ImageNet...")
+                self.backbone = backbone_config['model'](weights=backbone_config['weights'])
+            else:
+                self.backbone = backbone_config['model'](weights=None)
         
         self.feature_channels = backbone_config['feature_channels']
-        self.feature_indices = backbone_config['feature_indices']
+        self.feature_indices = backbone_config.get('feature_indices', None)
         
         # Freeze backbone if requested
         if freeze_backbone:
@@ -147,6 +174,16 @@ class RoadSignNetTransfer(nn.Module):
         self.head_p5 = DetectionHead(neck_channels, num_classes)
         
         self._initialize_new_layers()
+    
+    def _extract_features_yolo(self, x):
+        """Extract multi-scale features from YOLOv8 backbone"""
+        features = []
+        for i, layer in enumerate(self.backbone):
+            x = layer(x)
+            # YOLOv8n backbone outputs at layers 4, 6, 9 for P3, P4, P5
+            if i in [4, 6, 9]:
+                features.append(x)
+        return features
         
     def _extract_features_mobilenet(self, x):
         """Extract multi-scale features from MobileNetV3"""
@@ -185,7 +222,9 @@ class RoadSignNetTransfer(nn.Module):
     
     def forward(self, x):
         # Extract backbone features
-        if 'mobilenet' in self.backbone_name:
+        if self.backbone_type == 'yolo':
+            features = self._extract_features_yolo(x)
+        elif 'mobilenet' in self.backbone_name:
             features = self._extract_features_mobilenet(x)
         elif 'efficientnet' in self.backbone_name:
             features = self._extract_features_efficientnet(x)

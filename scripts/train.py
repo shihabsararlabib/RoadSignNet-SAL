@@ -17,6 +17,7 @@ from pathlib import Path
 import argparse
 import time
 from datetime import datetime
+import gc
 
 from roadsignnet_sal.model import create_roadsignnet_sal, create_roadsignnet_transfer
 from roadsignnet_sal.loss import RoadSignNetLoss
@@ -68,17 +69,24 @@ def setup_directories(config):
 def train(config, use_transfer_learning=False, backbone='mobilenet_v3_small', freeze_backbone=False):
     """Main training loop"""
     
+    # Clear CUDA cache from previous runs
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        gc.collect()
+    
     # Setup
     setup_directories(config)
-    # Force CPU if CUDA has issues (paging file errors)
+    # Force CPU if CUDA has issues (paging file errors or OOM)
     try:
         if torch.cuda.is_available():
             device = torch.device(config['hardware']['device'])
+            # Test if CUDA actually works
+            torch.zeros(1).to(device)
         else:
             device = torch.device('cpu')
-    except:
+    except Exception as e:
         device = torch.device('cpu')
-        print("⚠️  Warning: CUDA library loading failed, using CPU")
+        print(f"⚠️  Warning: CUDA error ({e}), using CPU")
     
     print("="*70)
     if use_transfer_learning:
@@ -175,6 +183,8 @@ def train(config, use_transfer_learning=False, backbone='mobilenet_v3_small', fr
         train_loss = 0
         train_loss_dict_sum = {}
         
+        accumulation_steps = config['training'].get('accumulation_steps', 1)
+        
         pbar = tqdm(train_loader, desc='Training')
         for batch_idx, (images, bboxes, labels) in enumerate(pbar):
             images = images.to(device)
@@ -185,14 +195,18 @@ def train(config, use_transfer_learning=False, backbone='mobilenet_v3_small', fr
             predictions = model(images)
             loss, loss_dict = criterion(predictions, None, bboxes, labels)
             
+            # Normalize loss for accumulation
+            loss = loss / accumulation_steps
+            
             # Backward
-            optimizer.zero_grad()
             loss.backward()
             
-            # Gradient clipping to prevent exploding gradients
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
-            
-            optimizer.step()
+            # Update weights every accumulation_steps
+            if (batch_idx + 1) % accumulation_steps == 0:
+                # Gradient clipping to prevent exploding gradients
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+                optimizer.step()
+                optimizer.zero_grad()
             
             # Accumulate
             train_loss += loss.item()
@@ -225,6 +239,11 @@ def train(config, use_transfer_learning=False, backbone='mobilenet_v3_small', fr
         
         avg_val_loss = val_loss / len(val_loader)
         avg_val_loss_dict = {k: v / len(val_loader) for k, v in val_loss_dict_sum.items()}
+        
+        # Memory cleanup
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
         # Scheduler step
         scheduler.step()
@@ -261,6 +280,10 @@ def train(config, use_transfer_learning=False, backbone='mobilenet_v3_small', fr
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
             }, save_path)
+        
+        # Memory cleanup to prevent fragmentation
+        torch.cuda.empty_cache()
+        gc.collect()
     
     if config['logging']['use_tensorboard']:
         writer.close()
@@ -276,8 +299,8 @@ if __name__ == '__main__':
                        help='Path to config file')
     parser.add_argument('--transfer', action='store_true',
                        help='Use transfer learning with pretrained backbone')
-    parser.add_argument('--backbone', type=str, default='mobilenet_v3_small',
-                       choices=['mobilenet_v3_small', 'mobilenet_v3_large', 'efficientnet_b0', 'resnet18'],
+    parser.add_argument('--backbone', type=str, default='yolov8n',
+                       choices=['yolov8n', 'mobilenet_v3_small', 'mobilenet_v3_large', 'efficientnet_b0', 'resnet18'],
                        help='Backbone for transfer learning')
     parser.add_argument('--freeze', action='store_true',
                        help='Freeze backbone weights (only train neck and head)')
