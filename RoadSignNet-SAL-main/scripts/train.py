@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RoadSignNet-SAL Training Script
+RoadSignNet-SAL Training Script with Transfer Learning Support
 """
 
 import sys
@@ -17,8 +17,9 @@ from pathlib import Path
 import argparse
 import time
 from datetime import datetime
+import gc
 
-from roadsignnet_sal.model import create_roadsignnet_sal
+from roadsignnet_sal.model import create_roadsignnet_sal, create_roadsignnet_transfer
 from roadsignnet_sal.loss import RoadSignNetLoss
 from roadsignnet_sal.dataset import create_dataloader
 
@@ -65,28 +66,58 @@ def setup_directories(config):
         Path(dir_path).mkdir(parents=True, exist_ok=True)
 
 
-def train(config):
+def train(config, use_transfer_learning=False, backbone='mobilenet_v3_small', freeze_backbone=False):
     """Main training loop"""
+    
+    # Clear CUDA cache from previous runs
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        gc.collect()
     
     # Setup
     setup_directories(config)
-    device = torch.device(config['hardware']['device'] if torch.cuda.is_available() else 'cpu')
+    # Force CPU if CUDA has issues (paging file errors or OOM)
+    try:
+        if torch.cuda.is_available():
+            device = torch.device(config['hardware']['device'])
+            # Test if CUDA actually works
+            torch.zeros(1).to(device)
+        else:
+            device = torch.device('cpu')
+    except Exception as e:
+        device = torch.device('cpu')
+        print(f"⚠️  Warning: CUDA error ({e}), using CPU")
     
     print("="*70)
-    print("ROADSIGNNET-SAL TRAINING")
+    if use_transfer_learning:
+        print("ROADSIGNNET-SAL TRAINING (TRANSFER LEARNING)")
+        print(f"Backbone: {backbone} (ImageNet pretrained)")
+    else:
+        print("ROADSIGNNET-SAL TRAINING")
     print("="*70)
     print(f"Device: {device}")
     print(f"Experiment: {config['experiment']['name']}")
     print(f"Epochs: {config['training']['epochs']}")
     print(f"Batch Size: {config['training']['batch_size']}")
     
-    # Model
-    model = create_roadsignnet_sal(
-        num_classes=config['model']['num_classes'],
-        width_multiplier=config['model']['width_multiplier']
-    ).to(device)
+    # Model - choose between original and transfer learning
+    if use_transfer_learning:
+        model = create_roadsignnet_transfer(
+            num_classes=config['model']['num_classes'],
+            backbone=backbone,
+            pretrained=True,
+            freeze_backbone=freeze_backbone
+        ).to(device)
+    else:
+        model = create_roadsignnet_sal(
+            num_classes=config['model']['num_classes'],
+            width_multiplier=config['model']['width_multiplier']
+        ).to(device)
     
-    print(f"\nModel Parameters: {sum(p.numel() for p in model.parameters()):,}")
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"\nTotal Parameters: {total_params:,}")
+    print(f"Trainable Parameters: {trainable_params:,}")
     
     # Loss
     criterion = RoadSignNetLoss(
@@ -152,6 +183,8 @@ def train(config):
         train_loss = 0
         train_loss_dict_sum = {}
         
+        accumulation_steps = config['training'].get('accumulation_steps', 1)
+        
         pbar = tqdm(train_loader, desc='Training')
         for batch_idx, (images, bboxes, labels) in enumerate(pbar):
             images = images.to(device)
@@ -162,14 +195,18 @@ def train(config):
             predictions = model(images)
             loss, loss_dict = criterion(predictions, None, bboxes, labels)
             
+            # Normalize loss for accumulation
+            loss = loss / accumulation_steps
+            
             # Backward
-            optimizer.zero_grad()
             loss.backward()
             
-            # Gradient clipping to prevent exploding gradients
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
-            
-            optimizer.step()
+            # Update weights every accumulation_steps
+            if (batch_idx + 1) % accumulation_steps == 0:
+                # Gradient clipping to prevent exploding gradients
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+                optimizer.step()
+                optimizer.zero_grad()
             
             # Accumulate
             train_loss += loss.item()
@@ -202,6 +239,11 @@ def train(config):
         
         avg_val_loss = val_loss / len(val_loader)
         avg_val_loss_dict = {k: v / len(val_loader) for k, v in val_loss_dict_sum.items()}
+        
+        # Memory cleanup
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
         # Scheduler step
         scheduler.step()
@@ -238,6 +280,10 @@ def train(config):
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
             }, save_path)
+        
+        # Memory cleanup to prevent fragmentation
+        torch.cuda.empty_cache()
+        gc.collect()
     
     if config['logging']['use_tensorboard']:
         writer.close()
@@ -251,7 +297,21 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train RoadSignNet-SAL')
     parser.add_argument('--config', type=str, default='config/config.yaml',
                        help='Path to config file')
+    parser.add_argument('--transfer', action='store_true',
+                       help='Use transfer learning with pretrained backbone')
+    parser.add_argument('--backbone', type=str, default='yolov8n',
+                       choices=['yolov8n', 'mobilenet_v3_small', 'mobilenet_v3_large', 'efficientnet_b0', 'resnet18'],
+                       help='Backbone for transfer learning')
+    parser.add_argument('--freeze', action='store_true',
+                       help='Freeze backbone weights (only train neck and head)')
     args = parser.parse_args()
     
-    config = load_config(args.config)
-    train(config)
+    # Resolve config path relative to script location
+    if not os.path.isabs(args.config):
+        script_dir = Path(__file__).parent.parent
+        config_path = script_dir / args.config
+    else:
+        config_path = args.config
+    
+    config = load_config(config_path)
+    train(config, use_transfer_learning=args.transfer, backbone=args.backbone, freeze_backbone=args.freeze)
