@@ -1,0 +1,54 @@
+names:
+- bicycle
+- bus_stop
+- children
+- crosswalk
+- do_not_stop
+- do_not_turn_left
+- do_not_turn_right
+- do_not_u_turn
+- enter_left_lane
+- give_way
+- green_light
+- left_lane_enter
+- left_turn
+- narrow_road
+- no_entry
+- no_overtaking
+- no_parking
+- no_stop
+- no_waiting
+- parking
+- railway_crossing
+- red_light
+- refueling
+- right_turn
+- road_main
+- road_work
+- school_nearby
+- speed_bump
+- speed_limit_100
+- speed_limit_120
+- speed_limit_20
+- speed_limit_30
+- speed_limit_40
+- speed_limit_50
+- speed_limit_60
+- speed_limit_70
+- speed_limit_80
+- stop
+- t_intersection_l
+- truck
+- u_turn
+- warning
+- yellow_light
+nc: 43
+roboflow:
+  license: CC BY 4.0
+  project: traffic-sign-detection-jgti0
+  url: https://universe.roboflow.com/traffic-sign-detection-vngbh/traffic-sign-detection-jgti0/dataset/1
+  version: 1
+  workspace: traffic-sign-detection-vngbh
+test: ../test/images
+train: ../train/images
+val: ../valid/images

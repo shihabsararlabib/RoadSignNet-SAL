@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data - too large for git
+data/train/
+data/valid/
+data/test/
+data_old/
+
+# Model outputs - large files
+outputs/checkpoints/*.pth
+outputs/exports/*.onnx
+outputs/exports/*.pt
+outputs/exports/*.pth
+outputs/logs/
+
+# Keep directory structure
+!outputs/checkpoints/.gitkeep
+!outputs/exports/.gitkeep
+!outputs/logs/.gitkeep
+
+# TensorBoard logs
+events.out.tfevents.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Roboflow cache
+.roboflow/
