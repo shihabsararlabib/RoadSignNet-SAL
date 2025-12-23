@@ -1,0 +1,7 @@
+model,mAP50,mAP50-95,precision,recall,f1_score,run_dir
+RoadSignNet-SAL-v5,0.4787447342832544,0.0,0.7768924297630195,0.626338329429155,0.6935383316638383,
+RoadSignNet-MobileNetV3,0.582157036971609,0.0,0.5701468186908047,0.748394003882016,0.6472217310604718,
+yolo11n,0.87743,0.75532,0.82437,0.8574,0.8405606400366243,C:\Users\T2510633\Downloads\RoadSignNet-SAL-main\RoadSignNet-SAL-main\outputs\comparison\runs\yolo11n_20260126_001641
+yolo11s,0.89033,0.77645,0.86995,0.85981,0.8648502742296603,C:\Users\T2510633\Downloads\RoadSignNet-SAL-main\RoadSignNet-SAL-main\outputs\comparison\runs\yolo11s_20260126_004630
+yolov8n,0.88267,0.75077,0.86321,0.81072,0.8361420214934793,C:\Users\T2510633\Downloads\RoadSignNet-SAL-main\RoadSignNet-SAL-main\outputs\comparison\runs\yolov8n_20260125_230909
+yolov8s,0.88474,0.76378,0.86284,0.88351,0.8730526687488037,C:\Users\T2510633\Downloads\RoadSignNet-SAL-main\RoadSignNet-SAL-main\outputs\comparison\runs\yolov8s_20260125_233548

@@ -1,0 +1,30 @@
+[
+  {
+    "model": "RoadSignNet-SAL-v5",
+    "epochs": 100,
+    "train_time_sec": 0,
+    "mAP50": 0.4787447342832544,
+    "mAP50-95": 0,
+    "precision": 0.7768924297630195,
+    "recall": 0.626338329429155,
+    "f1_score": 0.6935383316638383,
+    "model_size_mb": 5.0,
+    "inference_ms": 0,
+    "per_class": {},
+    "run_dir": null
+  },
+  {
+    "model": "RoadSignNet-MobileNetV3",
+    "epochs": 100,
+    "train_time_sec": 0,
+    "mAP50": 0.582157036971609,
+    "mAP50-95": 0,
+    "precision": 0.5701468186908047,
+    "recall": 0.748394003882016,
+    "f1_score": 0.6472217310604718,
+    "model_size_mb": 10.0,
+    "inference_ms": 0,
+    "per_class": {},
+    "run_dir": null
+  }
+]
