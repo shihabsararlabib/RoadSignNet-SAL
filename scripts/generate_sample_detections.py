@@ -1,5 +1,6 @@
 """
 Generate sample detection images for thesis defense slides.
+Uses the proper DetectionDecoder from the loss module.
 """
 import torch
 import sys
@@ -7,6 +8,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from roadsignnet_sal.model_optimized import create_roadsignnet_optimized
+from roadsignnet_sal.loss import DetectionDecoder
 from PIL import Image
 import torchvision.transforms as T
 import glob
@@ -16,79 +18,7 @@ import yaml
 import numpy as np
 
 
-def decode_predictions(outputs, conf_thresh=0.3, nms_thresh=0.5):
-    """Decode raw model outputs to boxes, scores, labels."""
-    all_boxes = []
-    all_scores = []
-    all_labels = []
-    
-    strides = [8, 16, 32]
-    
-    for i, output in enumerate(outputs):
-        stride = strides[i]
-        batch_size, _, h, w = output.shape
-        
-        # Output format: [batch, 4+1+num_classes, h, w]
-        output = output.permute(0, 2, 3, 1)  # [batch, h, w, channels]
-        
-        # Create grid
-        yv, xv = torch.meshgrid(torch.arange(h), torch.arange(w), indexing='ij')
-        grid = torch.stack([xv, yv], dim=-1).float().unsqueeze(0)
-        
-        # Decode boxes (first 4 channels)
-        box_output = output[..., :4]
-        xy = (torch.sigmoid(box_output[..., :2]) + grid) * stride
-        wh = torch.exp(box_output[..., 2:4]) * stride
-        
-        x1 = xy[..., 0] - wh[..., 0] / 2
-        y1 = xy[..., 1] - wh[..., 1] / 2
-        x2 = xy[..., 0] + wh[..., 0] / 2
-        y2 = xy[..., 1] + wh[..., 1] / 2
-        
-        boxes = torch.stack([x1, y1, x2, y2], dim=-1)
-        
-        # Objectness (5th channel)
-        obj = torch.sigmoid(output[..., 4:5])
-        
-        # Class probabilities
-        cls = torch.sigmoid(output[..., 5:])
-        
-        # Combine objectness and class probs
-        scores = obj * cls
-        
-        # Flatten
-        boxes = boxes.reshape(-1, 4)
-        scores = scores.reshape(-1, cls.shape[-1])
-        
-        all_boxes.append(boxes)
-        all_scores.append(scores)
-    
-    # Concatenate all scales
-    boxes = torch.cat(all_boxes, dim=0)
-    scores = torch.cat(all_scores, dim=0)
-    
-    # Get max class score and label for each box
-    max_scores, labels = scores.max(dim=1)
-    
-    # Filter by confidence
-    mask = max_scores > conf_thresh
-    boxes = boxes[mask]
-    max_scores = max_scores[mask]
-    labels = labels[mask]
-    
-    # Simple NMS
-    if len(boxes) > 0:
-        keep = torchvision.ops.nms(boxes, max_scores, nms_thresh)
-        boxes = boxes[keep]
-        max_scores = max_scores[keep]
-        labels = labels[keep]
-    
-    return boxes, max_scores, labels
-
-
 def main():
-    import torchvision.ops
-    
     # Load class names
     with open('data/data.yaml', 'r') as f:
         data_config = yaml.safe_load(f)
@@ -103,6 +33,14 @@ def main():
     model.to(device)
     model.eval()
     print(f'Model loaded on {device}')
+    
+    # Create decoder (same as evaluation script)
+    decoder = DetectionDecoder(
+        num_classes=43,
+        conf_thresh=0.3,  # Good balance for visualization
+        iou_thresh=0.45,
+        img_size=320
+    )
     
     # Transform
     transform = T.Compose([
@@ -127,8 +65,6 @@ def main():
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     axes = axes.flatten()
     
-    strides = [8, 16, 32]
-    
     for idx, img_path in enumerate(test_images):
         print(f'Processing image {idx+1}/{len(test_images)}: {os.path.basename(img_path)}')
         
@@ -140,76 +76,13 @@ def main():
         with torch.no_grad():
             outputs = model(input_tensor)
         
-        # Decode predictions
-        # Model output format: list of (cls, box, obj) tuples per scale
-        # cls: [B, num_classes*3, H, W] -> reshape needed
-        # box: [B, 12, H, W] -> 4 coords * 3 anchors  
-        # obj: [B, 3, H, W] -> 3 anchors
-        all_boxes = []
-        all_scores = []
+        # Decode predictions using proper decoder
+        boxes, scores, labels = decoder.decode(outputs)
         
-        for i, (cls_out, box_out, obj_out) in enumerate(outputs):
-            stride = strides[i]
-            batch_size, _, h, w = box_out.shape
-            num_anchors = 3
-            
-            # Move to CPU
-            cls_out = cls_out.cpu()  # [B, num_classes*3, H, W]
-            box_out = box_out.cpu()  # [B, 12, H, W]
-            obj_out = obj_out.cpu()  # [B, 3, H, W]
-            
-            # Reshape outputs
-            cls_out = cls_out.view(batch_size, 43, num_anchors, h, w).permute(0, 2, 3, 4, 1)  # [B, 3, H, W, 43]
-            box_out = box_out.view(batch_size, 4, num_anchors, h, w).permute(0, 2, 3, 4, 1)  # [B, 3, H, W, 4]
-            obj_out = obj_out.view(batch_size, num_anchors, h, w).unsqueeze(-1)  # [B, 3, H, W, 1]
-            
-            # Create grid
-            yv, xv = torch.meshgrid(torch.arange(h), torch.arange(w), indexing='ij')
-            grid = torch.stack([xv, yv], dim=-1).float()  # [H, W, 2]
-            
-            # Decode boxes
-            xy = (torch.sigmoid(box_out[..., :2]) + grid.unsqueeze(0).unsqueeze(0)) * stride
-            wh = torch.exp(torch.clamp(box_out[..., 2:4], max=10)) * stride
-            
-            x1 = xy[..., 0] - wh[..., 0] / 2
-            y1 = xy[..., 1] - wh[..., 1] / 2
-            x2 = xy[..., 0] + wh[..., 0] / 2
-            y2 = xy[..., 1] + wh[..., 1] / 2
-            
-            boxes = torch.stack([x1, y1, x2, y2], dim=-1)  # [B, 3, H, W, 4]
-            
-            # Scores = obj * cls
-            obj_prob = torch.sigmoid(obj_out)  # [B, 3, H, W, 1]
-            cls_prob = torch.sigmoid(cls_out)  # [B, 3, H, W, 43]
-            scores = obj_prob * cls_prob  # [B, 3, H, W, 43]
-            
-            # Flatten
-            boxes = boxes.reshape(-1, 4)
-            scores = scores.reshape(-1, 43)
-            
-            all_boxes.append(boxes)
-            all_scores.append(scores)
-        
-        boxes = torch.cat(all_boxes, dim=0)
-        scores = torch.cat(all_scores, dim=0)
-        
-        # Get max class score
-        max_scores, labels = scores.max(dim=1)
-        
-        # Filter by confidence
-        conf_thresh = 0.25
-        mask = max_scores > conf_thresh
-        boxes = boxes[mask]
-        max_scores = max_scores[mask]
-        labels = labels[mask]
-        
-        # NMS
-        if len(boxes) > 0:
-            import torchvision.ops
-            keep = torchvision.ops.nms(boxes, max_scores, 0.5)
-            boxes = boxes[keep]
-            max_scores = max_scores[keep]
-            labels = labels[keep]
+        # Move to CPU
+        boxes = boxes.cpu()
+        scores = scores.cpu()
+        labels = labels.cpu()
         
         print(f'  Found {len(boxes)} detections')
         
@@ -219,17 +92,17 @@ def main():
         ax.set_title(f'{len(boxes)} detections', fontsize=12, fontweight='bold')
         ax.axis('off')
         
-        # Draw boxes
+        # Draw boxes (limit to top 10)
         colors = plt.cm.tab20(np.linspace(0, 1, 20))
-        for i, (box, score, label) in enumerate(zip(boxes[:10], max_scores[:10], labels[:10])):
+        for i, (box, score, label) in enumerate(zip(boxes[:10], scores[:10], labels[:10])):
             x1, y1, x2, y2 = box.tolist()
-            # Scale to original size
+            # Scale to original size (model uses 320x320)
             x1 = x1 * orig_w / 320
             y1 = y1 * orig_h / 320
             x2 = x2 * orig_w / 320
             y2 = y2 * orig_h / 320
             
-            # Clamp
+            # Clamp to image bounds
             x1 = max(0, min(x1, orig_w))
             y1 = max(0, min(y1, orig_h))
             x2 = max(0, min(x2, orig_w))
