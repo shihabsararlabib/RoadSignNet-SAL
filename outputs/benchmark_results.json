@@ -1,0 +1,35 @@
+{
+  "model": {
+    "name": "RoadSignNet-SAL v5 Finetuned",
+    "params": 2036522,
+    "params_m": 2.036522,
+    "size_mb": 7.8058319091796875,
+    "img_size": 416
+  },
+  "benchmarks": {
+    "gpu": {
+      "device": "NVIDIA GeForce RTX 4070 Ti SUPER",
+      "mean_ms": 6.469399995403364,
+      "std_ms": 2.2477140876009862,
+      "min_ms": 4.269799974281341,
+      "max_ms": 10.55790000827983,
+      "fps": 154.57384003315912,
+      "p95_ms": 10.33762999868486,
+      "p99_ms": 10.48312600934878,
+      "peak_mb": 22.42724609375,
+      "real_time": true
+    },
+    "cpu": {
+      "device": "CPU",
+      "mean_ms": 29.737674001371488,
+      "std_ms": 0.7534297720099193,
+      "min_ms": 28.434299980290234,
+      "max_ms": 31.130399962421507,
+      "fps": 33.62737784918486,
+      "p95_ms": 30.90876500646118,
+      "p99_ms": 31.124617975438014,
+      "real_time": true,
+      "acceptable": true
+    }
+  }
+}
