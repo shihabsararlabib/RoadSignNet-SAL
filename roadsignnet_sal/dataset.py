@@ -5,7 +5,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from utils.preprocess import PREPROCESSOR
+from utils.preprocess import Preprocessor
 import cv2
 
 
@@ -27,13 +27,14 @@ class RoadSignDataset(Dataset):
                         list(self.img_dir.glob('*.JPG')) + \
                         list(self.img_dir.glob('*.PNG'))
         
-        # Use preprocessor transforms
+        # Use per-dataset preprocessor to respect img_size
+        self.preprocessor = Preprocessor(img_size=self.img_size)
         if augment and split == 'train':
-            self.transform = PREPROCESSOR.training_transform()
+            self.transform = self.preprocessor.training_transform()
         elif split == 'val' or split == 'test':
-            self.transform = PREPROCESSOR.validation_transform()
+            self.transform = self.preprocessor.validation_transform()
         else:
-            self.transform = PREPROCESSOR.validation_transform()
+            self.transform = self.preprocessor.validation_transform()
     
     def __len__(self):
         return len(self.img_files)

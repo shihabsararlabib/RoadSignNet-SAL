@@ -73,6 +73,9 @@ def detect_model_type(checkpoint):
     has_stage_v3 = any(k.startswith('neck_c2f') for k in state_dict.keys())
     has_v2_attention = any(k.startswith('detection_head.spatial_attention') for k in state_dict.keys())
     has_transfer = any(k.startswith('backbone.features') for k in state_dict.keys())
+    has_cnn_hybrid = any(k.startswith('cnn_backbone') or k.startswith('cnn_backbones.') for k in state_dict.keys())
+    has_timm = any(k.startswith('timm_backbone') for k in state_dict.keys())
+    has_hybrid = has_cnn_hybrid and has_timm
     
     # Check for optimized model (has spatial_att + bottom-up convs in neck)
     if has_spatial_att and has_bu_convs:
@@ -87,13 +90,15 @@ def detect_model_type(checkpoint):
         return 'v2'
     
     # Check for transfer learning
+    if has_hybrid:
+        return 'transfer'
     if has_transfer:
         return 'transfer'
     
     return 'original'
 
 
-def evaluate(config, checkpoint_path, backbone='mobilenet_v3_small'):
+def evaluate(config, checkpoint_path, backbone='mobilenet_v3_small', use_kan_cls=False, kan_grid=8):
     """Evaluate model on test set with accuracy metrics"""
     
     device = torch.device(config['hardware']['device'] if torch.cuda.is_available() else 'cpu')
@@ -105,6 +110,10 @@ def evaluate(config, checkpoint_path, backbone='mobilenet_v3_small'):
     # Load checkpoint first to detect model type
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model_type = detect_model_type(checkpoint)
+    has_kan = any('cls_head.kan.' in k for k in checkpoint['model_state_dict'].keys())
+    if has_kan and not use_kan_cls:
+        use_kan_cls = True
+        print("✓ Detected KAN classification head in checkpoint")
     
     num_classes = config['model']['num_classes']
     
@@ -191,7 +200,9 @@ def evaluate(config, checkpoint_path, backbone='mobilenet_v3_small'):
         model = create_roadsignnet_transfer(
             num_classes=num_classes,
             backbone=backbone,
-            pretrained=False  # Don't need pretrained weights, we'll load from checkpoint
+            pretrained=False,  # Don't need pretrained weights, we'll load from checkpoint
+            use_kan_cls=use_kan_cls,
+            kan_grid=kan_grid
         ).to(device)
         model.load_state_dict(checkpoint['model_state_dict'])
         model.eval()
@@ -220,7 +231,9 @@ def evaluate(config, checkpoint_path, backbone='mobilenet_v3_small'):
         print("✓ Detected original RoadSignNet-SAL model")
         model = create_roadsignnet_sal(
             num_classes=num_classes,
-            width_multiplier=config['model']['width_multiplier']
+            width_multiplier=config['model']['width_multiplier'],
+            use_kan_cls=use_kan_cls,
+            kan_grid=kan_grid
         ).to(device)
         model.load_state_dict(checkpoint['model_state_dict'])
         model.eval()
@@ -242,9 +255,9 @@ def evaluate(config, checkpoint_path, backbone='mobilenet_v3_small'):
         decoder = DetectionDecoder(
             num_classes=num_classes,
             conf_thresh=0.42,
-        iou_thresh=0.45,
-        img_size=config['data']['img_size']
-    )
+            iou_thresh=0.45,
+            img_size=config['data']['img_size']
+        )
     
     # Test dataloader
     test_loader = create_dataloader(
@@ -451,11 +464,16 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=str, default='config/config.yaml')
     parser.add_argument('--checkpoint', type=str, required=True)
     parser.add_argument('--backbone', type=str, default='mobilenet_v3_small',
-                       choices=['mobilenet_v3_small', 'mobilenet_v3_large', 'efficientnet_b0', 'resnet18'],
-                       help='Backbone used for transfer learning model')
+                       help='Backbone used for transfer learning model (supports hybrid: cnn+vit_tiny_patch16_224)')
+    parser.add_argument('--kan_cls', action='store_true',
+                       help='Use KAN-based classification head')
+    parser.add_argument('--kan_grid', type=int, default=8,
+                       help='KAN grid size')
     args = parser.parse_args()
     
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
     
-    evaluate(config, args.checkpoint, args.backbone)
+    use_kan_cls = args.kan_cls or config.get('model', {}).get('use_kan_cls', False)
+    kan_grid = config.get('model', {}).get('kan_grid', args.kan_grid)
+    evaluate(config, args.checkpoint, args.backbone, use_kan_cls=use_kan_cls, kan_grid=kan_grid)

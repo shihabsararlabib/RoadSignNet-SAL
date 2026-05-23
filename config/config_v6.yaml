@@ -13,6 +13,10 @@ model:
   width_multiplier: 1.5  # Increased from 1.0 for more capacity
   pretrained: false
   pretrained_path: null
+  backbone: "densenet121+efficientnet_b0+vit_tiny_patch16_224"
+  freeze_backbone: false
+  use_kan_cls: true
+  kan_grid: 8
   class_names:
     - bicycle
     - bus_stop
@@ -60,9 +64,11 @@ model:
 
 # Training Configuration - Extended training
 training:
-  epochs: 150  # Increased from 40 for better convergence
-  batch_size: 16
-  img_size: 640
+  epochs: 100  # Stop at 100 epochs per request
+  batch_size: 8
+  img_size: 224
+  num_workers: 0
+  accumulation_steps: 2
   
   # Optimizer - AdamW with cosine annealing
   optimizer:
@@ -77,12 +83,19 @@ training:
     warmup_epochs: 5
     min_lr: 0.000001
     T_max: 145  # epochs - warmup_epochs
+    eta_min: 0.000001
   
   # Mixed precision for faster training
   amp: true
   
   # Gradient clipping for stability
   grad_clip: 10.0
+
+  # Loss weights for anchor-based head
+  loss:
+    lambda_cls: 1.0
+    lambda_box: 2.0
+    lambda_obj: 1.0
   
   # Early stopping (disabled for full training)
   early_stopping:
@@ -136,6 +149,15 @@ distillation:
   enabled: true
   teacher_model: "yolo11s.pt"  # Best performing YOLO model
   temperature: 3.0
+  teacher_backbone: "densenet121+efficientnet_b0+vit_tiny_patch16_224"
+  teacher_checkpoint: "outputs/v6/checkpoints/best_model.pth"
+  student_type: "sal"  # sal | transfer
+  student_backbone: "mobilenet_v3_small"
+  student_use_kan_cls: true
+  student_kan_grid: 8
+  lambda_cls: 1.0
+  lambda_box: 0.5
+  lambda_obj: 0.5
   
   # Loss weights
   lambda_feat: 0.5      # Feature distillation
@@ -173,20 +195,22 @@ multi_scale:
 
 # Data
 data:
-  train_img_dir: "data/train/images"
-  train_label_dir: "data/train/labels"
-  val_img_dir: "data/valid/images"
-  val_label_dir: "data/valid/labels"
-  test_img_dir: "data/test/images"
-  test_label_dir: "data/test/labels"
-  num_workers: 4
-  pin_memory: true
+  train_img_dir: "RoadSignNet-SAL-main/data/train/images"
+  train_label_dir: "RoadSignNet-SAL-main/data/train/labels"
+  val_img_dir: "RoadSignNet-SAL-main/data/valid/images"
+  val_label_dir: "RoadSignNet-SAL-main/data/valid/labels"
+  test_img_dir: "RoadSignNet-SAL-main/data/test/images"
+  test_label_dir: "RoadSignNet-SAL-main/data/test/labels"
+  img_size: 224
+  num_workers: 0
+  pin_memory: false
 
 # Logging
 logging:
   log_dir: "outputs/v6/logs"
   save_interval: 10
   tensorboard: true
+  use_tensorboard: true
   wandb: false
 
 # Checkpointing
@@ -198,12 +222,25 @@ checkpoint:
 
 # Export
 export:
+<<<<<<< HEAD
+=======
+  save_dir: "outputs/v6/exports"
+  formats: [onnx, torchscript]
+  quantize: false
+
+hardware:
+  device: "cuda"
+  gpu_ids: [0]
+  mixed_precision: true
+  cudnn_benchmark: true
+>>>>>>> a9d4e23 (Backup triple-backbone KAN results (add LFS for .pth))
   onnx: true
   torchscript: true
   tflite: false
 
 # Hardware
 hardware:
-  device: 0  # GPU device ID
-  num_gpus: 1
-  distributed: false
+  device: "cuda"
+  gpu_ids: [0]
+  mixed_precision: true
+  cudnn_benchmark: true

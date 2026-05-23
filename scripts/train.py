@@ -66,7 +66,7 @@ def setup_directories(config):
         Path(dir_path).mkdir(parents=True, exist_ok=True)
 
 
-def train(config, use_transfer_learning=False, backbone='mobilenet_v3_small', freeze_backbone=False):
+def train(config, use_transfer_learning=False, backbone='mobilenet_v3_small', freeze_backbone=False, resume_path=None, use_kan_cls=False, kan_grid=8):
     """Main training loop"""
     
     # Clear CUDA cache from previous runs
@@ -106,12 +106,16 @@ def train(config, use_transfer_learning=False, backbone='mobilenet_v3_small', fr
             num_classes=config['model']['num_classes'],
             backbone=backbone,
             pretrained=True,
-            freeze_backbone=freeze_backbone
+            freeze_backbone=freeze_backbone,
+            use_kan_cls=use_kan_cls,
+            kan_grid=kan_grid
         ).to(device)
     else:
         model = create_roadsignnet_sal(
             num_classes=config['model']['num_classes'],
-            width_multiplier=config['model']['width_multiplier']
+            width_multiplier=config['model']['width_multiplier'],
+            use_kan_cls=use_kan_cls,
+            kan_grid=kan_grid
         ).to(device)
     
     total_params = sum(p.numel() for p in model.parameters())
@@ -171,9 +175,27 @@ def train(config, use_transfer_learning=False, backbone='mobilenet_v3_small', fr
     
     # Training history
     best_val_loss = float('inf')
+    start_epoch = 0
+
+    # Resume from checkpoint if provided
+    if resume_path:
+        resume_path = Path(resume_path)
+        if resume_path.exists():
+            print(f"✓ Resuming from checkpoint: {resume_path}")
+            checkpoint = torch.load(resume_path, map_location=device)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            start_epoch = checkpoint.get('epoch', -1) + 1
+            best_val_loss = checkpoint.get('val_loss', best_val_loss)
+
+            # Align scheduler to resumed epoch
+            for _ in range(start_epoch):
+                scheduler.step()
+        else:
+            print(f"⚠️  Resume checkpoint not found: {resume_path}")
     
     # Training loop
-    for epoch in range(config['training']['epochs']):
+    for epoch in range(start_epoch, config['training']['epochs']):
         print(f"\n{'='*70}")
         print(f"Epoch {epoch+1}/{config['training']['epochs']}")
         print(f"{'='*70}")
@@ -300,10 +322,15 @@ if __name__ == '__main__':
     parser.add_argument('--transfer', action='store_true',
                        help='Use transfer learning with pretrained backbone')
     parser.add_argument('--backbone', type=str, default='yolov8n',
-                       choices=['yolov8n', 'mobilenet_v3_small', 'mobilenet_v3_large', 'efficientnet_b0', 'resnet18'],
-                       help='Backbone for transfer learning')
+                       help='Backbone for transfer learning (supports hybrid: cnn+vit_tiny_patch16_224)')
     parser.add_argument('--freeze', action='store_true',
                        help='Freeze backbone weights (only train neck and head)')
+    parser.add_argument('--resume', type=str, default=None,
+                       help='Path to checkpoint to resume from')
+    parser.add_argument('--kan_cls', action='store_true',
+                       help='Use KAN-based classification head')
+    parser.add_argument('--kan_grid', type=int, default=8,
+                       help='KAN grid size (number of basis centers)')
     args = parser.parse_args()
     
     # Resolve config path relative to script location
@@ -314,4 +341,15 @@ if __name__ == '__main__':
         config_path = args.config
     
     config = load_config(config_path)
-    train(config, use_transfer_learning=args.transfer, backbone=args.backbone, freeze_backbone=args.freeze)
+    use_kan_cls = args.kan_cls or config.get('model', {}).get('use_kan_cls', False)
+    kan_grid = config.get('model', {}).get('kan_grid', args.kan_grid)
+
+    train(
+        config,
+        use_transfer_learning=args.transfer,
+        backbone=args.backbone,
+        freeze_backbone=args.freeze,
+        resume_path=args.resume,
+        use_kan_cls=use_kan_cls,
+        kan_grid=kan_grid
+    )

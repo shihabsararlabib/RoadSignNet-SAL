@@ -151,3 +151,73 @@ class LightweightDetectionHead(nn.Module):
     def forward(self, x):
         x = self.stem(x)
         return self.cls_head(x), self.box_head(x), self.obj_head(x)
+
+
+class LightweightDetectionHeadKAN(nn.Module):
+    """Lightweight Detection Head with KAN-based classification branch."""
+    def __init__(self, in_channels, num_classes=50, num_anchors=3, kan_grid=8):
+        super().__init__()
+
+        self.stem = nn.Sequential(
+            AsymmetricConvBlock(in_channels, in_channels, kernel_size=3),
+            AsymmetricConvBlock(in_channels, in_channels, kernel_size=3),
+        )
+
+        self.cls_head = KANConv1x1(in_channels, num_anchors * num_classes, grid_size=kan_grid)
+
+        self.box_head = nn.Sequential(
+            nn.Conv2d(in_channels, in_channels // 2, 1),
+            nn.SiLU(inplace=True),
+            nn.Conv2d(in_channels // 2, num_anchors * 4, 1)
+        )
+
+        self.obj_head = nn.Sequential(
+            nn.Conv2d(in_channels, in_channels // 2, 1),
+            nn.SiLU(inplace=True),
+            nn.Conv2d(in_channels // 2, num_anchors, 1)
+        )
+
+    def forward(self, x):
+        x = self.stem(x)
+        return self.cls_head(x), self.box_head(x), self.obj_head(x)
+
+
+class KANLinear(nn.Module):
+    """KAN-inspired linear layer using fixed triangular basis functions."""
+    def __init__(self, in_features, out_features, grid_size=8):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.grid_size = grid_size
+
+        centers = torch.linspace(-1.0, 1.0, grid_size)
+        self.register_buffer('centers', centers.view(1, 1, grid_size))
+        self.delta = 2.0 / (grid_size - 1)
+
+        self.weight = nn.Parameter(torch.randn(out_features, in_features, grid_size) * 0.02)
+        self.linear_weight = nn.Parameter(torch.randn(out_features, in_features) * 0.02)
+        self.bias = nn.Parameter(torch.zeros(out_features))
+
+    def forward(self, x):
+        # x: [B, in_features]
+        x = torch.tanh(x)
+        x_exp = x.unsqueeze(-1)
+        basis = torch.relu(1.0 - torch.abs(x_exp - self.centers) / self.delta)
+        out = torch.einsum('bik,oik->bo', basis, self.weight)
+        out = out + x @ self.linear_weight.t() + self.bias
+        return out
+
+
+class KANConv1x1(nn.Module):
+    """Apply KANLinear per spatial location like a 1x1 conv."""
+    def __init__(self, in_channels, out_channels, grid_size=8):
+        super().__init__()
+        self.kan = KANLinear(in_channels, out_channels, grid_size=grid_size)
+
+    def forward(self, x):
+        # x: [B, C, H, W]
+        b, c, h, w = x.shape
+        x_flat = x.permute(0, 2, 3, 1).reshape(-1, c)
+        y = self.kan(x_flat)
+        y = y.view(b, h, w, -1).permute(0, 3, 1, 2).contiguous()
+        return y

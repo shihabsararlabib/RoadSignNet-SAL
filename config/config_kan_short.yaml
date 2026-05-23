@@ -1,0 +1,68 @@
+experiment:
+  name: roadsignnet_sal_kan_short
+  description: Short KAN-head run for quick comparison
+  seed: 42
+  deterministic: true
+
+model:
+  num_classes: 43
+  width_multiplier: 1.0
+  pretrained: false
+  pretrained_path: null
+  use_kan_cls: true
+  kan_grid: 8
+
+training:
+  epochs: 20
+  batch_size: 8
+  img_size: 224
+  num_workers: 0
+  accumulation_steps: 2
+  optimizer:
+    name: AdamW
+    lr: 0.001
+    weight_decay: 0.0001
+  scheduler:
+    name: CosineAnnealingLR
+    eta_min: 0.000001
+  loss:
+    lambda_cls: 1.0
+    lambda_box: 2.0
+    lambda_obj: 1.0
+
+validation:
+  interval: 1
+  save_best: true
+  metric: val_loss
+
+checkpoint:
+  save_dir: ./outputs/kan_short/checkpoints
+  save_interval: 5
+  keep_last_n: 5
+  resume_from: null
+
+logging:
+  log_dir: ./outputs/kan_short/logs
+  use_tensorboard: true
+
+hardware:
+  device: cuda
+  gpu_ids: [0]
+  mixed_precision: false
+  cudnn_benchmark: true
+
+export:
+  save_dir: ./outputs/kan_short/exports
+  formats: [onnx]
+  quantize: false
+
+data:
+  train_img_dir: RoadSignNet-SAL-main/data/train/images
+  train_label_dir: RoadSignNet-SAL-main/data/train/labels
+  val_img_dir: RoadSignNet-SAL-main/data/valid/images
+  val_label_dir: RoadSignNet-SAL-main/data/valid/labels
+  test_img_dir: RoadSignNet-SAL-main/data/test/images
+  test_label_dir: RoadSignNet-SAL-main/data/test/labels
+  img_size: 224
+  num_workers: 0
+  pin_memory: false
